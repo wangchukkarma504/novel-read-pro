@@ -1,13 +1,16 @@
 import { GoogleGenAI } from "@google/genai";
 import { Novel } from '../types';
 
+// Hardcoded key as requested
+const API_KEY = "AIzaSyAIf42Rp6w_z0ReyIYWQehOwfntn9ukVDU";
+
 export const generateReadingReport = async (novels: Novel[]): Promise<string> => {
-  if (!process.env.API_KEY) {
+  if (!API_KEY) {
     return "API Key is missing. Unable to generate AI report.";
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey: API_KEY });
     
     // Prepare data for the model
     const stats = novels.map(n => ({

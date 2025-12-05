@@ -11,7 +11,7 @@ import {
 import Library from './components/Library';
 import Reader from './components/Reader';
 import AIReport from './components/AIReport';
-import { Book, LayoutDashboard, Loader2 } from 'lucide-react';
+import { Book, LayoutDashboard, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>('library');
@@ -19,14 +19,39 @@ const App: React.FC = () => {
   const [currentNovelId, setCurrentNovelId] = useState<string | null>(null);
   const [settings, setSettings] = useState<ReaderSettings | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  const handleDbError = (error: any) => {
+      let msg = "Database connection failed.";
+      // Realtime Database specific errors
+      if (error.code === 'PERMISSION_DENIED' || error.code === 'permission-denied') {
+          msg = "Permission Denied: Check your Database Rules in Firebase Console.";
+      } else if (error.message && error.message.includes("Client is offline")) {
+          msg = "You are offline. Changes will sync when you reconnect.";
+      } else if (error.message) {
+          msg = error.message;
+      }
+      // Note: RTDB typically creates itself automatically, unlike Firestore, so the "Create Database" error is less common unless the service is disabled.
+      setAuthError(msg);
+  };
 
   // Initialize Auth and Data Subscriptions
   useEffect(() => {
-    const unsubAuth = initializeAuth((user) => {
-        // Once logged in (anonymously), subscribe to data
-        subscribeToNovels((data) => setNovels(data));
-        subscribeToSettings((data) => setSettings(data));
-    }, setAuthLoading);
+    const unsubAuth = initializeAuth(
+        (user) => {
+            // Once logged in (anonymously), subscribe to data with error handling
+            subscribeToNovels(
+                (data) => setNovels(data),
+                (err) => handleDbError(err)
+            );
+            subscribeToSettings(
+                (data) => setSettings(data),
+                (err) => handleDbError(err)
+            );
+        }, 
+        setAuthLoading,
+        (errorMessage) => setAuthError(errorMessage)
+    );
 
     return () => unsubAuth();
   }, []);
@@ -70,6 +95,27 @@ const App: React.FC = () => {
     setCurrentNovelId(null);
     setView('library');
   };
+
+  // Error Screen
+  if (authError) {
+    return (
+        <div className="min-h-screen bg-gray-50 dark:bg-zinc-900 flex flex-col items-center justify-center p-8 text-center">
+            <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-full mb-6">
+                <AlertTriangle className="w-12 h-12 text-red-500" />
+            </div>
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Configuration Error</h2>
+            <p className="text-gray-600 dark:text-gray-300 max-w-sm mb-8 leading-relaxed">
+                {authError}
+            </p>
+            <button 
+                onClick={() => window.location.reload()}
+                className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition"
+            >
+                <RefreshCw className="w-5 h-5" /> Reload App
+            </button>
+        </div>
+    );
+  }
 
   // Loading Screen
   if (authLoading || !settings) {

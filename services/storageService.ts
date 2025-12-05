@@ -1,8 +1,7 @@
 import { db, auth } from './firebase';
 import { 
-  collection, doc, setDoc, deleteDoc, updateDoc, onSnapshot, 
-  query, orderBy, serverTimestamp, getDoc 
-} from 'firebase/firestore';
+  ref, set, remove, update, onValue, off, push, child 
+} from 'firebase/database';
 import { signInAnonymously, onAuthStateChanged, User } from 'firebase/auth';
 import { Novel, ReaderSettings } from '../types';
 
@@ -16,12 +15,13 @@ const DEFAULT_SETTINGS: ReaderSettings = {
 };
 
 let currentUser: User | null = null;
-let unsubscribeNovels: () => void = () => {};
-let unsubscribeSettings: () => void = () => {};
+let novelsRef: any = null;
+let settingsRef: any = null;
 
 export const initializeAuth = (
     onUserAvailable: (user: User) => void, 
-    onLoading: (isLoading: boolean) => void
+    onLoading: (isLoading: boolean) => void,
+    onError: (errorMessage: string) => void
 ) => {
     onLoading(true);
     // Persist login across refreshes
@@ -34,8 +34,17 @@ export const initializeAuth = (
             // Sign in anonymously if no user exists
             try {
                 await signInAnonymously(auth);
-            } catch (error) {
+            } catch (error: any) {
                 console.error("Auth Error", error);
+                let msg = "Authentication failed. Please check your internet connection.";
+                
+                if (error.code === 'auth/admin-restricted-operation' || error.code === 'auth/operation-not-allowed') {
+                    msg = "Access Denied: Anonymous Authentication is disabled. Go to Firebase Console > Build > Authentication > Sign-in method and enable 'Anonymous'.";
+                } else if (error.message) {
+                    msg = error.message;
+                }
+                
+                onError(msg);
                 onLoading(false);
             }
         }
@@ -45,28 +54,39 @@ export const initializeAuth = (
 
 // --- Novels ---
 
-export const subscribeToNovels = (callback: (novels: Novel[]) => void) => {
-    if (!currentUser) return;
+export const subscribeToNovels = (
+    callback: (novels: Novel[]) => void,
+    onError?: (error: any) => void
+) => {
+    if (!currentUser) return () => {};
 
-    const q = query(collection(db, 'users', currentUser.uid, 'novels'), orderBy('lastReadAt', 'desc'));
+    novelsRef = ref(db, `users/${currentUser.uid}/novels`);
     
-    unsubscribeNovels();
-    unsubscribeNovels = onSnapshot(q, (snapshot) => {
-        const novels: Novel[] = [];
-        snapshot.forEach((doc) => {
-            novels.push({ id: doc.id, ...doc.data() } as Novel);
-        });
+    const unsubscribe = onValue(novelsRef, (snapshot) => {
+        const data = snapshot.val();
+        if (!data) {
+            callback([]);
+            return;
+        }
+
+        // Convert object to array and sort client-side (RTDB sorting is limited)
+        const novels: Novel[] = Object.values(data);
+        novels.sort((a, b) => b.lastReadAt - a.lastReadAt); // Descending order
+        
         callback(novels);
+    }, (error) => {
+        console.error("Database Novels Error:", error);
+        if (onError) onError(error);
     });
-    return unsubscribeNovels;
+
+    return () => off(novelsRef);
 };
 
 export const addNovelToStore = async (novel: Novel) => {
     if (!currentUser) return;
     try {
-        // We use the ID generated in the app logic, or let Firestore generate one
-        const docRef = doc(db, 'users', currentUser.uid, 'novels', novel.id);
-        await setDoc(docRef, novel);
+        const novelRef = ref(db, `users/${currentUser.uid}/novels/${novel.id}`);
+        await set(novelRef, novel);
     } catch (e) {
         console.error("Error adding novel:", e);
     }
@@ -75,7 +95,8 @@ export const addNovelToStore = async (novel: Novel) => {
 export const removeNovelFromStore = async (id: string) => {
     if (!currentUser) return;
     try {
-        await deleteDoc(doc(db, 'users', currentUser.uid, 'novels', id));
+        const novelRef = ref(db, `users/${currentUser.uid}/novels/${id}`);
+        await remove(novelRef);
     } catch (e) {
         console.error("Error deleting novel:", e);
     }
@@ -84,11 +105,11 @@ export const removeNovelFromStore = async (id: string) => {
 export const updateNovelProgress = async (id: string, chapter: number, scroll: number) => {
     if (!currentUser) return;
     try {
-        const docRef = doc(db, 'users', currentUser.uid, 'novels', id);
-        await updateDoc(docRef, {
+        const novelRef = ref(db, `users/${currentUser.uid}/novels/${id}`);
+        await update(novelRef, {
             currentChapter: chapter,
             scrollPosition: scroll,
-            lastReadAt: Date.now() // Use client timestamp for immediate UI sort, or serverTimestamp() if strict
+            lastReadAt: Date.now()
         });
     } catch (e) {
         console.error("Error updating progress:", e);
@@ -97,29 +118,36 @@ export const updateNovelProgress = async (id: string, chapter: number, scroll: n
 
 // --- Settings ---
 
-export const subscribeToSettings = (callback: (settings: ReaderSettings) => void) => {
-    if (!currentUser) return;
+export const subscribeToSettings = (
+    callback: (settings: ReaderSettings) => void,
+    onError?: (error: any) => void
+) => {
+    if (!currentUser) return () => {};
 
-    const docRef = doc(db, 'users', currentUser.uid, 'settings', 'config');
+    settingsRef = ref(db, `users/${currentUser.uid}/settings`);
     
-    unsubscribeSettings();
-    unsubscribeSettings = onSnapshot(docRef, (docSnap) => {
-        if (docSnap.exists()) {
-            callback({ ...DEFAULT_SETTINGS, ...docSnap.data() } as ReaderSettings);
+    const unsubscribe = onValue(settingsRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            callback({ ...DEFAULT_SETTINGS, ...data });
         } else {
-            // Initialize default settings if they don't exist
-            setDoc(docRef, DEFAULT_SETTINGS);
+            // Initialize defaults if empty
+            set(settingsRef, DEFAULT_SETTINGS);
             callback(DEFAULT_SETTINGS);
         }
+    }, (error) => {
+        console.error("Database Settings Error:", error);
+        if (onError) onError(error);
     });
-    return unsubscribeSettings;
+
+    return () => off(settingsRef);
 };
 
 export const saveSettingsToStore = async (settings: ReaderSettings) => {
     if (!currentUser) return;
     try {
-        const docRef = doc(db, 'users', currentUser.uid, 'settings', 'config');
-        await setDoc(docRef, settings);
+        const sRef = ref(db, `users/${currentUser.uid}/settings`);
+        await set(sRef, settings);
     } catch (e) {
         console.error("Error saving settings:", e);
     }

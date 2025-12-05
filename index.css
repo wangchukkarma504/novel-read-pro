@@ -1,0 +1,20 @@
+/* Global Styles */
+
+/* Hide scrollbar for cleaner mobile UI */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Basic Reset */
+body, #root {
+  min-height: 100vh;
+}
