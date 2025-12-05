@@ -1,10 +1,23 @@
 import { GoogleGenAI } from "@google/genai";
 import { Novel } from '../types';
 
-// Hardcoded key as requested
-const API_KEY = "AIzaSyAIf42Rp6w_z0ReyIYWQehOwfntn9ukVDU";
+const RETRY_DELAY = 1000;
+const MAX_RETRIES = 3;
+
+async function retryOperation<T>(operation: () => Promise<T>, retries = MAX_RETRIES): Promise<T> {
+    try {
+        return await operation();
+    } catch (error) {
+        if (retries > 0) {
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+            return retryOperation(operation, retries - 1);
+        }
+        throw error;
+    }
+}
 
 export const generateReadingReport = async (novels: Novel[]): Promise<string> => {
+  const API_KEY = process.env.API_KEY;
   if (!API_KEY) {
     return "API Key is missing. Unable to generate AI report.";
   }
@@ -26,14 +39,44 @@ export const generateReadingReport = async (novels: Novel[]): Promise<string> =>
       Data: ${JSON.stringify(stats)}
     `;
 
-    const response = await ai.models.generateContent({
+    const response = await retryOperation(() => ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
-    });
+    }));
 
     return response.text || "Could not generate report.";
   } catch (error) {
     console.error("AI Error:", error);
     return "The AI is taking a nap. Please try again later.";
+  }
+};
+
+export const explainText = async (text: string, contextTitle: string): Promise<string> => {
+  const API_KEY = process.env.API_KEY;
+  if (!API_KEY) return "API Key missing.";
+
+  try {
+    const ai = new GoogleGenAI({ apiKey: API_KEY });
+    const prompt = `
+      You are a helpful reading assistant. 
+      The user is reading the novel "${contextTitle}".
+      They selected the following text: "${text}".
+      
+      Please do the following:
+      1. If the text is not in English, translate it.
+      2. Provide a definition of difficult words.
+      3. Explain the cultural context or idiom if applicable.
+      4. Keep the response concise (under 100 words) and easy to read.
+    `;
+
+    const response = await retryOperation(() => ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+    }));
+
+    return response.text || "No explanation available.";
+  } catch (error) {
+    console.error("AI Explanation Error:", error);
+    return "Could not fetch explanation. Please check connection.";
   }
 };

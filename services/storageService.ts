@@ -1,8 +1,14 @@
 import { db, auth } from './firebase';
 import { 
-  ref, set, remove, update, onValue, off, push, child 
+  ref, set, remove, update, onValue, off 
 } from 'firebase/database';
-import { signInAnonymously, onAuthStateChanged, User } from 'firebase/auth';
+import { 
+  onAuthStateChanged, 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  signOut, 
+  User 
+} from 'firebase/auth';
 import { Novel, ReaderSettings } from '../types';
 
 const DEFAULT_SETTINGS: ReaderSettings = {
@@ -12,44 +18,56 @@ const DEFAULT_SETTINGS: ReaderSettings = {
   fontFamily: 'Georgia, serif',
   backgroundColor: '#1a1a1a',
   textColor: '#e5e5e5',
+  autoScrollEnabled: false,
+  autoScrollSpeed: 2,
 };
 
 let currentUser: User | null = null;
 let novelsRef: any = null;
 let settingsRef: any = null;
 
+// Helper to use email as key (sanitized)
+const getUserKey = (user: User) => {
+    if (user.email) return user.email.replace(/\./g, '_');
+    return user.uid;
+};
+
 export const initializeAuth = (
-    onUserAvailable: (user: User) => void, 
+    onUserAvailable: (user: User | null) => void, 
     onLoading: (isLoading: boolean) => void,
     onError: (errorMessage: string) => void
 ) => {
     onLoading(true);
-    // Persist login across refreshes
+    // Listen for auth state changes
     const unsub = onAuthStateChanged(auth, async (user) => {
-        if (user) {
-            currentUser = user;
-            onUserAvailable(user);
-            onLoading(false);
-        } else {
-            // Sign in anonymously if no user exists
-            try {
-                await signInAnonymously(auth);
-            } catch (error: any) {
-                console.error("Auth Error", error);
-                let msg = "Authentication failed. Please check your internet connection.";
-                
-                if (error.code === 'auth/admin-restricted-operation' || error.code === 'auth/operation-not-allowed') {
-                    msg = "Access Denied: Anonymous Authentication is disabled. Go to Firebase Console > Build > Authentication > Sign-in method and enable 'Anonymous'.";
-                } else if (error.message) {
-                    msg = error.message;
-                }
-                
-                onError(msg);
-                onLoading(false);
-            }
-        }
+        currentUser = user;
+        onUserAvailable(user);
+        onLoading(false);
+    }, (error) => {
+        console.error("Auth Error", error);
+        onError(error.message);
+        onLoading(false);
     });
     return unsub;
+};
+
+export const loginWithGoogle = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+        await signInWithPopup(auth, provider);
+    } catch (error: any) {
+        console.error("Login failed:", error);
+        throw error;
+    }
+};
+
+export const logout = async () => {
+    try {
+        await signOut(auth);
+        currentUser = null;
+    } catch (error) {
+        console.error("Logout failed:", error);
+    }
 };
 
 // --- Novels ---
@@ -60,7 +78,8 @@ export const subscribeToNovels = (
 ) => {
     if (!currentUser) return () => {};
 
-    novelsRef = ref(db, `users/${currentUser.uid}/novels`);
+    const userKey = getUserKey(currentUser);
+    novelsRef = ref(db, `users/${userKey}/novels`);
     
     const unsubscribe = onValue(novelsRef, (snapshot) => {
         const data = snapshot.val();
@@ -85,7 +104,8 @@ export const subscribeToNovels = (
 export const addNovelToStore = async (novel: Novel) => {
     if (!currentUser) return;
     try {
-        const novelRef = ref(db, `users/${currentUser.uid}/novels/${novel.id}`);
+        const userKey = getUserKey(currentUser);
+        const novelRef = ref(db, `users/${userKey}/novels/${novel.id}`);
         await set(novelRef, novel);
     } catch (e) {
         console.error("Error adding novel:", e);
@@ -95,7 +115,8 @@ export const addNovelToStore = async (novel: Novel) => {
 export const removeNovelFromStore = async (id: string) => {
     if (!currentUser) return;
     try {
-        const novelRef = ref(db, `users/${currentUser.uid}/novels/${id}`);
+        const userKey = getUserKey(currentUser);
+        const novelRef = ref(db, `users/${userKey}/novels/${id}`);
         await remove(novelRef);
     } catch (e) {
         console.error("Error deleting novel:", e);
@@ -105,7 +126,8 @@ export const removeNovelFromStore = async (id: string) => {
 export const updateNovelProgress = async (id: string, chapter: number, scroll: number) => {
     if (!currentUser) return;
     try {
-        const novelRef = ref(db, `users/${currentUser.uid}/novels/${id}`);
+        const userKey = getUserKey(currentUser);
+        const novelRef = ref(db, `users/${userKey}/novels/${id}`);
         await update(novelRef, {
             currentChapter: chapter,
             scrollPosition: scroll,
@@ -124,7 +146,8 @@ export const subscribeToSettings = (
 ) => {
     if (!currentUser) return () => {};
 
-    settingsRef = ref(db, `users/${currentUser.uid}/settings`);
+    const userKey = getUserKey(currentUser);
+    settingsRef = ref(db, `users/${userKey}/settings`);
     
     const unsubscribe = onValue(settingsRef, (snapshot) => {
         const data = snapshot.val();
@@ -146,7 +169,8 @@ export const subscribeToSettings = (
 export const saveSettingsToStore = async (settings: ReaderSettings) => {
     if (!currentUser) return;
     try {
-        const sRef = ref(db, `users/${currentUser.uid}/settings`);
+        const userKey = getUserKey(currentUser);
+        const sRef = ref(db, `users/${userKey}/settings`);
         await set(sRef, settings);
     } catch (e) {
         console.error("Error saving settings:", e);

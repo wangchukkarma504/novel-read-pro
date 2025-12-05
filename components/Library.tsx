@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
 import { Novel } from '../types';
 import { extractUrlPattern } from '../services/novelService';
-import { Plus, BookOpen, Trash2, Search, Book } from 'lucide-react';
+import { Plus, BookOpen, Trash2, Search, Book, LogOut } from 'lucide-react';
 
 interface Props {
   novels: Novel[];
   onAddNovel: (novel: Novel) => void;
   onSelectNovel: (novel: Novel) => void;
   onDeleteNovel: (id: string) => void;
+  onLogout: () => void;
+  userEmail: string;
 }
 
-const Library: React.FC<Props> = ({ novels, onAddNovel, onSelectNovel, onDeleteNovel }) => {
+const Library: React.FC<Props> = ({ novels, onAddNovel, onSelectNovel, onDeleteNovel, onLogout, userEmail }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [newUrl, setNewUrl] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -43,12 +45,24 @@ const Library: React.FC<Props> = ({ novels, onAddNovel, onSelectNovel, onDeleteN
         <h1 className="text-2xl font-bold flex items-center gap-2">
             <Book className="text-blue-500"/> Library
         </h1>
-        <button 
-          onClick={() => setIsAdding(!isAdding)}
-          className="p-2 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition"
-        >
-          <Plus className="w-6 h-6" />
-        </button>
+        <div className="flex items-center gap-3">
+            <div className="text-right hidden sm:block">
+                <p className="text-xs text-gray-500 dark:text-gray-400">{userEmail}</p>
+            </div>
+            <button 
+                onClick={onLogout}
+                className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full transition"
+                title="Sign Out"
+            >
+                <LogOut className="w-5 h-5" />
+            </button>
+            <button 
+            onClick={() => setIsAdding(!isAdding)}
+            className="p-2 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition"
+            >
+            <Plus className="w-6 h-6" />
+            </button>
+        </div>
       </header>
 
       {/* Add Novel Section */}

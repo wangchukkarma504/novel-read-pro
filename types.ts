@@ -15,6 +15,8 @@ export interface ReaderSettings {
   fontFamily: string;
   backgroundColor: string;
   textColor: string;
+  autoScrollEnabled?: boolean;
+  autoScrollSpeed?: number; // 1-10
 }
 
 export interface ChapterData {
