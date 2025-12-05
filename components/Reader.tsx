@@ -18,10 +18,18 @@ const Reader: React.FC<Props> = ({ novel, settings, onUpdateSettings, onBack }) 
   const [error, setError] = useState<string | null>(null);
   const [showControls, setShowControls] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
+  
+  // Initialize with novel prop, but keep local state to allow fast UI updates before DB sync
   const [currentChapter, setCurrentChapter] = useState(novel.currentChapter);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const autoSaveRef = useRef<number | null>(null);
+
+  // Sync internal chapter state if novel prop updates (e.g. from external db change)
+  // But only if we aren't currently reading (to prevent jumps)
+  useEffect(() => {
+     // Optional: You might want to sync if the user opens the same novel on another device
+  }, [novel.currentChapter]);
 
   // Load Chapter Content
   useEffect(() => {
@@ -52,13 +60,14 @@ const Reader: React.FC<Props> = ({ novel, settings, onUpdateSettings, onBack }) 
     }
   }, [loading, data]);
 
-  // Handle Scroll Saving
+  // Handle Scroll Saving with Debounce
   useEffect(() => {
     const handleScroll = () => {
       if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
+      // NodeJS.Timeout vs number issue resolved by window.setTimeout returning number in browser
       autoSaveRef.current = window.setTimeout(() => {
          updateNovelProgress(novel.id, currentChapter, window.scrollY);
-      }, 500);
+      }, 1000); // Save every 1 second of inactivity or scrolling stop
     };
 
     window.addEventListener('scroll', handleScroll);
@@ -71,8 +80,11 @@ const Reader: React.FC<Props> = ({ novel, settings, onUpdateSettings, onBack }) 
   const changeChapter = (delta: number) => {
     const next = currentChapter + delta;
     if (next > 0) {
+      // Optimistic update
       setCurrentChapter(next);
       window.scrollTo(0,0);
+      // Immediate save to DB on chapter change
+      updateNovelProgress(novel.id, next, 0);
     }
   };
 

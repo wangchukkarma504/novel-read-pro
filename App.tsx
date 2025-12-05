@@ -1,60 +1,85 @@
 import React, { useState, useEffect } from 'react';
 import { ViewState, Novel, ReaderSettings } from './types';
-import { getNovels, saveNovels, getSettings, saveSettings } from './services/storageService';
+import { 
+    initializeAuth, 
+    subscribeToNovels, 
+    subscribeToSettings, 
+    addNovelToStore, 
+    removeNovelFromStore, 
+    saveSettingsToStore 
+} from './services/storageService';
 import Library from './components/Library';
 import Reader from './components/Reader';
 import AIReport from './components/AIReport';
-import { Book, LayoutDashboard } from 'lucide-react';
+import { Book, LayoutDashboard, Loader2 } from 'lucide-react';
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>('library');
   const [novels, setNovels] = useState<Novel[]>([]);
-  const [currentNovel, setCurrentNovel] = useState<Novel | null>(null);
-  const [settings, setSettings] = useState<ReaderSettings>(getSettings());
+  const [currentNovelId, setCurrentNovelId] = useState<string | null>(null);
+  const [settings, setSettings] = useState<ReaderSettings | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
-  // Load initial state
+  // Initialize Auth and Data Subscriptions
   useEffect(() => {
-    setNovels(getNovels());
-    setSettings(getSettings());
+    const unsubAuth = initializeAuth((user) => {
+        // Once logged in (anonymously), subscribe to data
+        subscribeToNovels((data) => setNovels(data));
+        subscribeToSettings((data) => setSettings(data));
+    }, setAuthLoading);
+
+    return () => unsubAuth();
   }, []);
 
   // Sync settings with DOM for Tailwind dark mode
   useEffect(() => {
-    if (settings.themeMode === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
+    if (settings) {
+      if (settings.themeMode === 'dark') {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
     }
-  }, [settings.themeMode]);
+  }, [settings]);
+
+  // Derived state for current novel to ensure we always have the latest progress data
+  const currentNovel = novels.find(n => n.id === currentNovelId) || null;
 
   const handleAddNovel = (novel: Novel) => {
-    const updated = [novel, ...novels];
-    setNovels(updated);
-    saveNovels(updated);
+    addNovelToStore(novel);
   };
 
   const handleDeleteNovel = (id: string) => {
-    const updated = novels.filter(n => n.id !== id);
-    setNovels(updated);
-    saveNovels(updated);
+    removeNovelFromStore(id);
+    if (currentNovelId === id) {
+        setView('library');
+        setCurrentNovelId(null);
+    }
   };
 
   const handleSelectNovel = (novel: Novel) => {
-    setCurrentNovel(novel);
+    setCurrentNovelId(novel.id);
     setView('reader');
   };
 
   const handleUpdateSettings = (newSettings: ReaderSettings) => {
-    setSettings(newSettings);
-    saveSettings(newSettings);
+    saveSettingsToStore(newSettings);
   };
 
   const handleBackFromReader = () => {
-    // Refresh novels list to get updated progress
-    setNovels(getNovels());
-    setCurrentNovel(null);
+    setCurrentNovelId(null);
     setView('library');
   };
+
+  // Loading Screen
+  if (authLoading || !settings) {
+      return (
+          <div className="min-h-screen bg-gray-50 dark:bg-zinc-900 flex flex-col items-center justify-center text-gray-500">
+              <Loader2 className="w-10 h-10 animate-spin mb-4 text-blue-500" />
+              <p>Syncing Library...</p>
+          </div>
+      );
+  }
 
   // Render Logic
   if (view === 'reader' && currentNovel) {
